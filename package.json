@@ -4,9 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node --test tests/ingestion.test.js tests/reconciliation.test.js",
+    "test": "node --test tests/ingestion.test.js tests/reconciliation.test.js tests/agent.test.js",
     "test:session1": "node --test tests/ingestion.test.js",
     "test:session2": "node --test tests/reconciliation.test.js",
+    "test:session3": "node --test tests/agent.test.js",
     "generate:fixtures": "node scripts/generate_fixtures.js",
     "ingest": "node bin/ingest.js"
   },
@@ -15,6 +16,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@google/genai": "^1.0.0",
     "better-sqlite3": "^13.0.3",
     "csv-parse": "^7.0.2",
     "express": "^5.2.1",
