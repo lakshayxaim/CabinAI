@@ -36,7 +36,9 @@ const DEFAULT_CONFIG = Object.freeze({
   maxDaysBeforeIssue: 2,         // Max allowable days payment can appear before invoice issue date
   maxDaysAfterDue: 30,           // Max allowable days payment can appear after invoice due date
   amountTolerance: 0.00,         // Strict monetary equality by default (0.00 difference)
-  counterpartyThreshold: 0.70    // Minimum similarity score for vendor matching
+  counterpartyThreshold: 0.70,   // Minimum similarity score for vendor matching
+  explicitAccountingToleranceReason: null, // Disallow tolerance as generic rescue mechanism
+  allowedToleranceMatchTypes: Object.freeze([]) // Match types explicitly authorized for tolerance
 });
 
 /**

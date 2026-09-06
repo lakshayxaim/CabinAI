@@ -261,7 +261,8 @@ class DeterministicMatcher {
       candidateAmount,
       source.currency,
       candidateCurrency,
-      opts
+      opts,
+      { matchType: compat.matchType }
     );
 
     // Stage 3: Date Window Comparison

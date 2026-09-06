@@ -595,4 +595,77 @@ describe('CabinAI - Deterministic Reconciliation Matcher (Session 2)', () => {
     const rentMatch = matcher.match(rentBankTx, allCandidates);
     assert.equal(rentMatch.decision, MatchDecision.UNMATCHED);
   });
+
+  test('19. Exact amount is a hard compatibility gate: generic tolerance does NOT rescue invoice mismatch', () => {
+    // Bank transaction is $120.00, invoice is $125.00
+    const bankTx = {
+      id: 'tx-underpaid',
+      amount: 120.00,
+      currency: 'USD',
+      direction: Direction.OUTFLOW,
+      transaction_date: '2024-03-02',
+      description: 'AMAZON WEB SERVICES'
+    };
+
+    const invoice = {
+      id: 'inv-aws-125',
+      document_type: DocumentType.PAYABLE,
+      counterparty_name: 'Amazon Web Services Inc.',
+      issue_date: '2024-03-01',
+      due_date: '2024-03-31',
+      currency: 'USD',
+      total: 125.00
+    };
+
+    // A) Default matcher has amountTolerance = 0.00: rejects as no match
+    assert.equal(matcher.config.amountTolerance, 0.00, 'Default tolerance must be strictly 0');
+    const defaultRes = matcher.match(bankTx, [invoice]);
+    assert.equal(defaultRes.decision, MatchDecision.UNMATCHED);
+    assert.equal(defaultRes.score, 0.0);
+
+    // B) Generic tolerance passed (amountTolerance = 10.00) WITHOUT explicit accounting reason:
+    // MUST NOT act as a generic rescue mechanism; hard gate rejects invoice match
+    const looseMatcher = new DeterministicMatcher({ amountTolerance: 10.00 });
+    const looseRes = looseMatcher.match(bankTx, [invoice]);
+    assert.equal(looseRes.decision, MatchDecision.UNMATCHED, 'Generic tolerance must not rescue invoice mismatch');
+    assert.equal(looseRes.score, 0.0);
+    assert.equal(looseRes.allCandidates[0].rejectionReason, RejectionReason.AMOUNT_MISMATCH);
+    assert.ok(looseRes.allCandidates[0].reasons.amount.includes('hard compatibility gate'));
+  });
+
+  test('20. Explicit accounting reason and authorized match type allows configured tolerance when justified', () => {
+    // A wire transfer fee was deducted ($25.00 intermediary wire fee)
+    const bankTx = {
+      id: 'tx-wire-deduct',
+      amount: 2675.00, // Invoice is 2700.00, $25 wire fee deducted
+      currency: 'USD',
+      direction: Direction.INFLOW,
+      transaction_date: '2024-03-05',
+      description: 'ACME CORP WIRE PAYMENT'
+    };
+
+    const invoice = {
+      id: 'inv-acme-2700',
+      document_type: DocumentType.RECEIVABLE,
+      counterparty_name: 'Acme Corporation',
+      issue_date: '2024-03-05',
+      due_date: '2024-04-05',
+      currency: 'USD',
+      total: 2700.00
+    };
+
+    // With documented explicit accounting reason and authorized match type
+    const justifiedMatcher = new DeterministicMatcher({
+      amountTolerance: 30.00,
+      explicitAccountingToleranceReason: 'INTERMEDIARY_WIRE_TRANSFER_FEE',
+      allowedToleranceMatchTypes: [MatchType.BANK_TO_INVOICE]
+    });
+
+    const result = justifiedMatcher.match(bankTx, [invoice]);
+    assert.equal(result.decision, MatchDecision.MATCH);
+    assert.ok(result.score >= 0.80);
+    assert.equal(result.amountComparison.isExact, false);
+    assert.equal(result.amountComparison.difference, 25.00);
+    assert.ok(result.reasons.amount.includes('INTERMEDIARY_WIRE_TRANSFER_FEE'));
+  });
 });

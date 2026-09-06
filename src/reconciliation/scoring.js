@@ -3,7 +3,7 @@
  * Pure mathematical scoring based on amount, date window, and counterparty similarity.
  */
 
-const { RejectionReason, DEFAULT_CONFIG } = require('./types');
+const { MatchType, RejectionReason, DEFAULT_CONFIG } = require('./types');
 const { calculateCounterpartySimilarity } = require('./normalizers');
 const { normalizeCurrency } = require('../normalizers/amountNormalizer');
 
@@ -60,7 +60,7 @@ function daysDifference(d1, d2) {
  *   explanation: string
  * }}
  */
-function compareAmount(sourceAmount, candidateAmount, sourceCurrency = 'USD', candidateCurrency = 'USD', options = {}) {
+function compareAmount(sourceAmount, candidateAmount, sourceCurrency = 'USD', candidateCurrency = 'USD', options = {}, context = {}) {
   const normSourceCurr = normalizeCurrency(sourceCurrency);
   const normCandCurr = normalizeCurrency(candidateCurrency);
 
@@ -102,7 +102,27 @@ function compareAmount(sourceAmount, candidateAmount, sourceCurrency = 'USD', ca
     };
   }
 
+  // Hard compatibility gate for invoice <-> bank matching:
+  // Exact amount is required. Generic tolerance must NOT act as a rescue mechanism.
+  // Allowed only when an explicit accounting reason is documented AND the match type is explicitly authorized.
+  const isInvoiceMatch = context.matchType === MatchType.BANK_TO_INVOICE;
+  const explicitReason = options.explicitAccountingToleranceReason || options.toleranceReason;
+  const isTypeAuthorized = Array.isArray(options.allowedToleranceMatchTypes) &&
+    options.allowedToleranceMatchTypes.includes(context.matchType);
+
+  if (isInvoiceMatch && (!explicitReason || !isTypeAuthorized)) {
+    return {
+      isCompatible: false,
+      isExact: false,
+      difference: diff,
+      score: 0.0,
+      rejectionReason: RejectionReason.AMOUNT_MISMATCH,
+      explanation: `Amount mismatch: source ${normSourceCurr} ${sourceAmount.toFixed(2)} vs invoice ${normCandCurr} ${candidateAmount.toFixed(2)} (diff: ${diff.toFixed(2)}). Exact amount is a hard compatibility gate for invoice-bank matching.`
+    };
+  }
+
   if (diff <= tolerance && tolerance > 0) {
+    const reasonText = explicitReason || 'explicit tolerance';
     const score = Math.round(Math.max(0.5, 1.0 - (diff / tolerance) * 0.3) * 1000) / 1000;
     return {
       isCompatible: true,
@@ -110,7 +130,7 @@ function compareAmount(sourceAmount, candidateAmount, sourceCurrency = 'USD', ca
       difference: diff,
       score,
       rejectionReason: null,
-      explanation: `Amount within configured tolerance of ${tolerance.toFixed(2)}: difference is ${diff.toFixed(2)}`
+      explanation: `Amount within explicit accounting tolerance (${tolerance.toFixed(2)}, reason: ${reasonText}): difference is ${diff.toFixed(2)}`
     };
   }
 
