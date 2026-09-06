@@ -370,8 +370,8 @@ class DeterministicMatcher {
         const rejected = evaluations[0];
         return new MatchResult({
           source: sourceTransaction,
-          candidate: rejected.candidate,
-          candidateId: rejected.candidateId,
+          candidate: null,
+          candidateId: null,
           matchType: rejected.candidateType,
           score: 0.0,
           decision: MatchDecision.REJECTED,
@@ -384,20 +384,18 @@ class DeterministicMatcher {
       }
 
       // Otherwise (amount difference, date outside window, or multiple incompatible candidates)
-      const primary = evaluations[0];
       return new MatchResult({
         source: sourceTransaction,
-        candidate: primary?.candidate || null,
-        candidateId: primary?.candidateId || null,
-        matchType: primary?.candidateType || MatchType.UNKNOWN,
+        candidate: null,
+        candidateId: null,
+        matchType: MatchType.UNKNOWN,
         score: 0.0,
         decision: MatchDecision.UNMATCHED,
-        amountComparison: primary?.amountComparison || null,
-        dateDifference: primary?.dateDifference || null,
-        counterpartySimilarity: primary?.counterpartySimilarity || null,
+        amountComparison: null,
+        dateDifference: null,
+        counterpartySimilarity: null,
         reasons: {
-          ...(primary?.reasons || {}),
-          summary: `None of the ${candidates.length} candidate(s) produced a matching score`
+          summary: `None of the ${candidates.length} candidate(s) met compatibility and matching criteria`
         },
         allCandidates: evaluations
       });
@@ -412,8 +410,8 @@ class DeterministicMatcher {
     if (best.score < confidenceThreshold) {
       return new MatchResult({
         source: sourceTransaction,
-        candidate: best.candidate,
-        candidateId: best.candidateId,
+        candidate: null,
+        candidateId: null,
         matchType: best.candidateType,
         score: best.score,
         decision: MatchDecision.UNMATCHED,

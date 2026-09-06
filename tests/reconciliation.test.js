@@ -233,7 +233,9 @@ describe('CabinAI - Deterministic Reconciliation Matcher (Session 2)', () => {
     assert.notEqual(result.decision, MatchDecision.MATCH);
     assert.equal(result.decision, MatchDecision.UNMATCHED);
     assert.ok(result.score < DEFAULT_CONFIG.confidenceThreshold);
-    assert.equal(result.candidateId, invoice.id);
+    assert.equal(result.candidate, null, 'UNMATCHED result must not populate candidate');
+    assert.equal(result.candidateId, null, 'UNMATCHED result must not populate candidateId');
+    assert.equal(result.allCandidates[0].candidateId, invoice.id, 'allCandidates preserves candidate details');
   });
 
   test('8. Multiple plausible invoices -> ambiguous, not arbitrary', () => {
@@ -667,5 +669,95 @@ describe('CabinAI - Deterministic Reconciliation Matcher (Session 2)', () => {
     assert.equal(result.amountComparison.isExact, false);
     assert.equal(result.amountComparison.difference, 25.00);
     assert.ok(result.reasons.amount.includes('INTERMEDIARY_WIRE_TRANSFER_FEE'));
+  });
+
+  test('21. Conservative bank description: Raw banking noise and reference tokens do not produce permissive similarity score', () => {
+    // Bank description with banking noise and reference code
+    const bankDesc = 'ACME CORP WIRE PAYMENT TRANSFER REF-9841';
+
+    // Candidate A has noise tokens ("Payment", "Wire", "Transfer") but is NOT the true vendor
+    const noiseVendor = 'Payment Solutions Wire Transfer Inc.';
+    const simA = calculateCounterpartySimilarity(bankDesc, noiseVendor);
+    assert.equal(simA.score, 0.0, 'Raw noise tokens in bank description must not match vendor');
+    assert.equal(simA.normalized1, 'acme', 'Cleaned vendor representation must be used');
+
+    // Candidate B is the true vendor ("Acme Corporation")
+    const trueVendor = 'Acme Corporation';
+    const simB = calculateCounterpartySimilarity(bankDesc, trueVendor);
+    assert.equal(simB.score, 1.0, 'Cleaned vendor representation matches true vendor');
+    assert.equal(simB.normalized1, 'acme');
+    assert.equal(simB.normalized2, 'acme');
+
+    // Bank description containing ONLY noise tokens (no genuine vendor name)
+    const pureNoiseDesc = 'WIRE PAYMENT TRANSFER 9841';
+    const simPureNoise = calculateCounterpartySimilarity(pureNoiseDesc, 'Payment Solutions Inc.');
+    assert.equal(simPureNoise.isEvaluated, false, 'Pure noise bank description must not evaluate vendor similarity');
+    assert.equal(simPureNoise.score, null);
+
+    // Ensure AWS / Amazon generic word safety is preserved
+    const simAmazon = calculateCounterpartySimilarity('Amazon', 'Amazon Web Services');
+    assert.ok(simAmazon.score <= 0.60, 'Generic word Amazon must not match Amazon Web Services');
+  });
+
+  test('22. UNMATCHED and REJECTED results do NOT populate candidate/candidateId, keeping rejected details in allCandidates', () => {
+    const invoice = {
+      id: 'inv-rej-01',
+      invoice_number: 'INV-REJ-01',
+      document_type: DocumentType.PAYABLE,
+      counterparty_name: 'Alpha Software',
+      issue_date: '2024-03-01',
+      due_date: '2024-03-31',
+      currency: 'USD',
+      total: 300.00
+    };
+
+    // Case A: UNMATCHED due to counterparty mismatch
+    const txWrongVendor = {
+      id: 'tx-unmatched-vendor',
+      amount: 300.00,
+      currency: 'USD',
+      direction: Direction.OUTFLOW,
+      transaction_date: '2024-03-05',
+      description: 'ZETA LOGISTICS'
+    };
+    const resA = matcher.match(txWrongVendor, [invoice]);
+    assert.equal(resA.decision, MatchDecision.UNMATCHED);
+    assert.equal(resA.candidate, null, 'candidate must be null for UNMATCHED');
+    assert.equal(resA.candidateId, null, 'candidateId must be null for UNMATCHED');
+    assert.equal(resA.allCandidates.length, 1);
+    assert.equal(resA.allCandidates[0].candidateId, invoice.id);
+    assert.ok(resA.allCandidates[0].reasons.summary);
+
+    // Case B: UNMATCHED due to date outside window
+    const txLate = {
+      id: 'tx-unmatched-date',
+      amount: 300.00,
+      currency: 'USD',
+      direction: Direction.OUTFLOW,
+      transaction_date: '2024-06-30',
+      description: 'ALPHA SOFTWARE'
+    };
+    const resB = matcher.match(txLate, [invoice]);
+    assert.equal(resB.decision, MatchDecision.UNMATCHED);
+    assert.equal(resB.candidate, null, 'candidate must be null for UNMATCHED');
+    assert.equal(resB.candidateId, null, 'candidateId must be null for UNMATCHED');
+    assert.equal(resB.allCandidates[0].candidateId, invoice.id);
+
+    // Case C: REJECTED due to direction mismatch
+    const txInflow = {
+      id: 'tx-rejected-direction',
+      amount: 300.00,
+      currency: 'USD',
+      direction: Direction.INFLOW, // Incompatible with payable
+      transaction_date: '2024-03-05',
+      description: 'ALPHA SOFTWARE'
+    };
+    const resC = matcher.match(txInflow, [invoice]);
+    assert.equal(resC.decision, MatchDecision.REJECTED);
+    assert.equal(resC.candidate, null, 'candidate must be null for REJECTED');
+    assert.equal(resC.candidateId, null, 'candidateId must be null for REJECTED');
+    assert.equal(resC.allCandidates.length, 1);
+    assert.equal(resC.allCandidates[0].candidateId, invoice.id);
+    assert.equal(resC.allCandidates[0].rejectionReason, RejectionReason.INCOMPATIBLE_DIRECTION);
   });
 });

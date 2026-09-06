@@ -18,9 +18,9 @@ const LEGAL_SUFFIXES = new Set([
 const BANKING_NOISE_WORDS = new Set([
   'wire', 'payment', 'transfer', 'payout', 'sub', 'subscription',
   'ach', 'direct', 'deposit', 'dir', 'dep', 'debit', 'credit',
-  'bill', 'pay', 'online', 'card', 'pos', 'ref', 'txn', 'transaction',
+  'bill', 'pay', 'online', 'card', 'pos', 'ref', 'reference', 'txn', 'transaction',
   'fee', 'charge', 'purchase', 'withdrawal', 'check', 'chk', 'bank',
-  'monthly', 'annual', 'autopay', 'statement'
+  'monthly', 'annual', 'autopay', 'statement', 'invoice', 'inv'
 ]);
 
 /**
@@ -69,11 +69,14 @@ function normalizeCounterparty(str) {
 }
 
 /**
- * Extracts and normalizes the core vendor tokens from a bank transaction description,
- * stripping common banking transaction descriptors (e.g. WIRE, PAYMENT, TRANSFER)
- * and corporate suffixes.
+ * Conservatively extracts and normalizes the core vendor tokens from a bank transaction description.
+ * Strips banking transaction noise words (e.g. WIRE, PAYMENT, TRANSFER, ACH),
+ * corporate suffixes, digits, and reference code patterns.
+ * If all tokens are noise/reference tokens, returns empty string so that raw noise
+ * cannot be falsely attributed as vendor identity.
+ *
  * @param {string} description 
- * @returns {string} Normalized counterparty candidate from bank description
+ * @returns {string} Clean conservative counterparty representation from bank description
  */
 function extractBankCounterparty(description) {
   if (!description || typeof description !== 'string') {
@@ -91,14 +94,28 @@ function extractBankCounterparty(description) {
     return '';
   }
 
-  // Filter out noise words, digits, and corporate suffixes if other tokens exist
-  const filtered = tokens.filter(t => !BANKING_NOISE_WORDS.has(t) && !LEGAL_SUFFIXES.has(t) && !/^\d+$/.test(t));
-  if (filtered.length > 0) {
-    return filtered.join(' ');
+  // Filter out noise words, corporate suffixes, tokens with digits, and reference patterns
+  const filtered = tokens.filter(t => {
+    if (BANKING_NOISE_WORDS.has(t)) return false;
+    if (LEGAL_SUFFIXES.has(t)) return false;
+    if (/\d/.test(t)) return false; // Reference codes, dates, numbers (e.g. 9841, ref01, inv102)
+    if (/^(ref|txn|inv|chk|trf)[a-z0-9]*$/.test(t)) return false;
+    return true;
+  });
+
+  if (filtered.length === 0) {
+    return '';
   }
 
-  // If everything was filtered, return normalized base
-  return normalizeCounterparty(description);
+  // Deduplicate repeated consecutive tokens (e.g. "acme acme" -> "acme")
+  const uniqueTokens = [];
+  for (const t of filtered) {
+    if (uniqueTokens.length === 0 || uniqueTokens[uniqueTokens.length - 1] !== t) {
+      uniqueTokens.push(t);
+    }
+  }
+
+  return uniqueTokens.join(' ');
 }
 
 /**
@@ -222,7 +239,10 @@ function tokenSimilarity(s1, s2) {
 
 /**
  * Deterministic counterparty similarity evaluator.
- * Evaluates similarity between bank description/counterparty and document vendor/customer.
+ * Conservatively evaluates similarity between bank description/counterparty and document vendor/customer.
+ * Raw banking noise and reference tokens from the bank description are excluded so they cannot
+ * produce a more permissive similarity score than the cleaned vendor representation.
+ *
  * @param {string|null} raw1 First counterparty or bank description
  * @param {string|null} raw2 Second counterparty (vendor or customer name)
  * @returns {{
@@ -244,79 +264,75 @@ function calculateCounterpartySimilarity(raw1, raw2) {
     };
   }
 
+  // Conservative bank counterparty extraction:
+  // Extract conservative cleaned representation for bank description (raw1).
+  // If cleanBank1 is non-empty, use it strictly as the vendor representation.
+  // Raw banking noise and reference tokens from raw1 must NEVER be used to inflate
+  // or produce a more permissive similarity score than the cleaned representation.
+  const cleanBank1 = extractBankCounterparty(raw1);
   const norm1 = normalizeCounterparty(raw1);
   const norm2 = normalizeCounterparty(raw2);
 
-  if (!norm1 || !norm2) {
+  // If cleanBank1 could not be extracted (e.g. description only contained noise like "CHECK #101"
+  // or "WIRE TRANSFER 998"), then no genuine vendor name is present.
+  // Fall back to norm1 only if raw1 had no identifiable banking noise keywords.
+  const hasNoiseTokens = norm1.split(' ').some(t => BANKING_NOISE_WORDS.has(t) || /\d/.test(t));
+  const vendor1 = cleanBank1 || (hasNoiseTokens ? '' : norm1);
+  const vendor2 = norm2;
+
+  if (!vendor1 || !vendor2) {
     return {
       score: null,
       isEvaluated: false,
-      normalized1: norm1 || null,
-      normalized2: norm2 || null,
-      explanation: 'Counterparty name is empty after normalization'
+      normalized1: vendor1 || null,
+      normalized2: vendor2 || null,
+      explanation: 'Counterparty unknown or missing; vendor identity cannot be verified'
     };
   }
 
-  // Exact normalized match
-  if (norm1 === norm2) {
+  // Exact match between conservative vendor representation and normalized candidate
+  if (vendor1 === vendor2) {
     return {
       score: 1.0,
       isEvaluated: true,
-      normalized1: norm1,
-      normalized2: norm2,
-      explanation: `Exact normalized counterparty match: "${norm1}"`
+      normalized1: vendor1,
+      normalized2: vendor2,
+      explanation: `Exact normalized counterparty match: "${vendor1}"`
     };
   }
 
-  // Check bank noise-filtered version
-  const cleanBank1 = extractBankCounterparty(raw1);
-  const cleanBank2 = extractBankCounterparty(raw2);
-
-  if (cleanBank1 === norm2 || norm1 === cleanBank2 || cleanBank1 === cleanBank2) {
-    return {
-      score: 1.0,
-      isEvaluated: true,
-      normalized1: cleanBank1,
-      normalized2: cleanBank2,
-      explanation: `Exact counterparty match after banking noise removal: "${cleanBank1 || norm1}"`
-    };
-  }
-
-  // Compute token-level similarity across both regular and noise-cleaned representations
-  const baseTokenScore = tokenSimilarity(norm1, norm2);
-  const cleanTokenScore1 = cleanBank1 ? tokenSimilarity(cleanBank1, norm2) : 0;
-  const cleanTokenScore2 = cleanBank2 ? tokenSimilarity(norm1, cleanBank2) : 0;
-  const cleanTokenScoreBoth = (cleanBank1 && cleanBank2) ? tokenSimilarity(cleanBank1, cleanBank2) : 0;
-
-  const bestTokenScore = Math.max(baseTokenScore, cleanTokenScore1, cleanTokenScore2, cleanTokenScoreBoth);
+  // Token-level similarity strictly between cleaned vendor1 and normalized vendor2.
+  // Conservative: Raw banking noise tokens in raw1 are excluded so they cannot produce
+  // an accidental or permissive match.
+  const tokenScore = tokenSimilarity(vendor1, vendor2);
 
   // If token score is 0 (no common or similar tokens at all), strings are completely different
-  if (bestTokenScore === 0) {
+  if (tokenScore === 0) {
     return {
       score: 0.0,
       isEvaluated: true,
-      normalized1: norm1,
-      normalized2: norm2,
-      explanation: `No counterparty match (0.0%): "${norm1}" vs "${norm2}"`
+      normalized1: vendor1,
+      normalized2: vendor2,
+      explanation: `No counterparty match (0.0%): "${vendor1}" vs "${vendor2}"`
     };
   }
 
-  const finalScore = Math.round(bestTokenScore * 1000) / 1000;
+  const finalScore = Math.round(tokenScore * 1000) / 1000;
 
   let explanation;
   if (finalScore >= 0.85) {
-    explanation = `High counterparty similarity (${(finalScore * 100).toFixed(1)}%): "${norm1}" vs "${norm2}"`;
+    explanation = `High counterparty similarity (${(finalScore * 100).toFixed(1)}%): "${vendor1}" vs "${vendor2}"`;
   } else if (finalScore >= 0.60) {
-    explanation = `Moderate counterparty similarity (${(finalScore * 100).toFixed(1)}%): "${norm1}" vs "${norm2}"`;
+    explanation = `Moderate counterparty similarity (${(finalScore * 100).toFixed(1)}%): "${vendor1}" vs "${vendor2}"`;
   } else {
-    explanation = `Low counterparty similarity (${(finalScore * 100).toFixed(1)}%): "${norm1}" vs "${norm2}"`;
+    explanation = `Low counterparty similarity (${(finalScore * 100).toFixed(1)}%): "${vendor1}" vs "${vendor2}"`;
   }
 
   return {
     score: finalScore,
     isEvaluated: true,
-    normalized1: norm1,
-    normalized2: norm2,
+    normalized1: vendor1,
+    normalized2: vendor2,
     explanation
   };
 }
