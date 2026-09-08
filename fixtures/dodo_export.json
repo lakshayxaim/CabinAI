@@ -1,0 +1,31 @@
+{
+  "payments": [
+    {
+      "payment_id": "dodopay_98765",
+      "type": "payment",
+      "amount": 9900,
+      "fee": 320,
+      "settlement_amount": 9580,
+      "currency": "USD",
+      "status": "succeeded",
+      "created_at": "2024-03-02T10:15:30.000Z",
+      "customer": {
+        "customer_id": "dodocus_4321",
+        "name": "Alice Wonderland",
+        "email": "alice@example.com"
+      },
+      "invoice_id": "dodoinv_8812"
+    },
+    {
+      "payment_id": "dodopo_54321",
+      "type": "payout",
+      "amount": 9580,
+      "fee": 0,
+      "settlement_amount": 9580,
+      "currency": "USD",
+      "status": "completed",
+      "created_at": "2024-03-03T16:45:00.000Z",
+      "customer": null
+    }
+  ]
+}

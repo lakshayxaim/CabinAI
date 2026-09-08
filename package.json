@@ -4,13 +4,19 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test tests/ingestion.test.js",
+    "generate:fixtures": "node scripts/generate_fixtures.js",
+    "ingest": "node bin/ingest.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "express": "^5.2.1"
+    "better-sqlite3": "^13.0.3",
+    "csv-parse": "^7.0.2",
+    "express": "^5.2.1",
+    "pdf-parse": "^2.4.5",
+    "pdfkit": "^0.20.2"
   }
 }
