@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CabinAI — Autonomous Bookkeeping</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <div class="brand">CabinAI</div>
+      <h1>Autonomous Bookkeeping</h1>
+      <p class="subtitle">Your books, checked automatically. Your attention only when it matters.</p>
+      <div class="actions">
+        <button id="btn-reconcile" class="btn primary">Run reconciliation</button>
+        <button id="btn-seed" class="btn ghost">Load demo data</button>
+      </div>
+      <div id="run-status" class="run-status" aria-live="polite"></div>
+    </header>
+
+    <section class="stats">
+      <div class="stat"><div class="stat-num" id="stat-total">–</div><div class="stat-label">Transactions checked</div></div>
+      <div class="stat"><div class="stat-num" id="stat-reconciled">–</div><div class="stat-label">Reconciled</div></div>
+      <div class="stat"><div class="stat-num" id="stat-attention">–</div><div class="stat-label">Need attention</div></div>
+    </section>
+
+    <section>
+      <h2>Needs attention</h2>
+      <div id="attention-list" class="list"></div>
+    </section>
+
+    <section>
+      <h2>Reconciled</h2>
+      <div id="reconciled-list" class="list"></div>
+    </section>
+  </div>
+
+  <div id="detail-overlay" class="overlay hidden">
+    <div class="detail" role="dialog" aria-modal="true">
+      <button id="detail-close" class="btn ghost small">Close</button>
+      <div id="detail-body"></div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

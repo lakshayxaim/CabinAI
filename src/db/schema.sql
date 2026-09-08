@@ -118,3 +118,53 @@ CREATE TABLE IF NOT EXISTS payment_provider_records (
 CREATE INDEX IF NOT EXISTS idx_ppr_provider ON payment_provider_records(provider);
 CREATE INDEX IF NOT EXISTS idx_ppr_record_type ON payment_provider_records(record_type);
 CREATE INDEX IF NOT EXISTS idx_ppr_provider_id ON payment_provider_records(provider, provider_record_id);
+
+-- 7. Reconciliation / Agent Decisions (Session 4 — additive persistence layer)
+-- One row per bank transaction. Upserted idempotently on transaction_id.
+-- Authoritative outcome is final_decision; once a human approves/corrects a row
+-- (review_status IN ('approved','corrected')), agent re-runs must NOT overwrite
+-- the human's final_decision / category / invoice / vendor outcome.
+-- API keys are NEVER stored here (provider/model names only).
+CREATE TABLE IF NOT EXISTS reconciliation_decisions (
+    id TEXT PRIMARY KEY,
+    transaction_id TEXT NOT NULL UNIQUE,
+    deterministic_decision TEXT,
+    agent_decision TEXT,
+    final_decision TEXT NOT NULL,
+    category TEXT,
+    confidence REAL,
+    matched_invoice_id TEXT,
+    matched_vendor_id TEXT,
+    reasoning TEXT,
+    evidence TEXT, -- JSON string array
+    red_flags TEXT, -- JSON string array of {code, message} (Session 4 review reasons)
+    needs_review INTEGER NOT NULL DEFAULT 0,
+    provider TEXT,
+    model TEXT,
+    fallback_occurred INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    reviewed_at TEXT,
+    review_status TEXT NOT NULL DEFAULT 'pending' CHECK (review_status IN ('pending', 'approved', 'corrected')),
+    reviewer_decision TEXT,
+    correction_reason TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_decisions_tx ON reconciliation_decisions(transaction_id);
+CREATE INDEX IF NOT EXISTS idx_decisions_review ON reconciliation_decisions(review_status, needs_review);
+
+-- 8. Human Review Corrections (Session 4)
+-- Append-only audit log of reviewer corrections. One row per correction event.
+CREATE TABLE IF NOT EXISTS review_corrections (
+    id TEXT PRIMARY KEY,
+    transaction_id TEXT NOT NULL,
+    original_category TEXT,
+    corrected_category TEXT,
+    original_invoice_id TEXT,
+    corrected_invoice_id TEXT,
+    original_vendor_id TEXT,
+    corrected_vendor_id TEXT,
+    reason TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_corrections_tx ON review_corrections(transaction_id);
